@@ -1,0 +1,202 @@
+name: Eigen
+
+on:
+  workflow_dispatch:
+  # push:
+  #   branches: [ "main", "master" ]
+  # pull_request:
+  #   branches: [ "main", "master" ]
+
+jobs:
+  build-library:
+    runs-on: ${{ matrix.os }} # 指定运行环境，使用矩阵变量os
+    strategy: # 定义构建策略
+      fail-fast: false # 设置fail-fast为false，即使矩阵中一个任务失败，其他任务也会继续执行
+      matrix:  # 定义矩阵策略，用于创建多个构建配置组合
+        os: [ubuntu-latest, windows-latest]
+        c_compiler: [gcc, clang, cl]
+        include: # 包含特定组合的列表（精确控制矩阵）
+          # Windows + MSVC
+          - os: windows-latest
+            c_compiler: cl
+            cpp_compiler: cl
+            generator: "Visual Studio 17 2022"
+            arch: "x64"
+          # Windows + MinGW
+          - os: windows-latest
+            c_compiler: gcc
+            cpp_compiler: g++
+            generator: "MinGW Makefiles"
+          # Linux + GCC
+          - os: ubuntu-latest
+            c_compiler: gcc
+            cpp_compiler: g++
+            generator: "Unix Makefiles"
+          # Linux + Clang
+          - os: ubuntu-latest
+            c_compiler: clang
+            cpp_compiler: clang++
+            generator: "Unix Makefiles"
+        exclude: # 排除不需要的组合
+          # 排除 Windows + Clang
+          - os: windows-latest
+            c_compiler: clang
+          # 排除 Ubuntu + MSVC
+          - os: ubuntu-latest
+            c_compiler: cl
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set reusable strings
+        id: strings
+        shell: bash
+        run: |
+            # github workspace path
+            workspace_dir="${{ github.workspace }}"       # 从GitHub上下文获取路径并标准化
+            workspace_dir="${workspace_dir//\\//}"        # 替换所有反斜杠为正斜杠
+            workspace_dir="${workspace_dir%/}"            # 移除路径末尾的斜杠（若有）
+
+            # release output path
+            full_version="v5.0.0-$(date +'%Y%m%d')" # 使用语义化版本+日期
+            platform=$(echo $RUNNER_OS | tr '[:upper:]' '[:lower:]')-$(uname -m) # short_os-arch
+            if [ "$RUNNER_OS" == "Linux" ]; then
+              toolchain="${{ matrix.c_compiler }}"
+            elif [ "$RUNNER_OS" == "Windows" ]; then
+              if [ "${{ matrix.c_compiler }}" == "cl" ]; then
+                toolchain="msvc"
+              else
+                toolchain="mingw"
+              fi
+            fi
+            release_dir_name="eigen-${full_version}-${platform}-${toolchain}"
+
+            # github actions env
+            echo "WORKSPACE_DIR=$workspace_dir" >> "$GITHUB_OUTPUT"
+            echo "RELEASE_DIR_NAME=$release_dir_name" >> "$GITHUB_OUTPUT"
+
+            # debug output
+            echo "=== GITHUB_OUTPUT ==="
+            cat "$GITHUB_OUTPUT"
+
+      - name: Pull eigen repo
+        shell: bash
+        run: |
+          git clone --recurse-submodules -b 5.0.0 --depth 1 --shallow-submodules https://gitlab.com/libeigen/eigen.git
+          mkdir -p ${{ steps.strings.outputs.RELEASE_DIR_NAME }}
+          cd eigen
+          ls -alh
+
+      - name: Configure CMake project
+        shell: bash
+        run: |
+          # -B <build-dir> -G <generator-name> -S <source-dir> -DCMAKE_INSTALL_PREFIX=<install-dir> -DCMAKE_BUILD_TYPE=<type> -A <arch for vs>
+
+          if [[ "${{ matrix.os }}" == "ubuntu-latest" ]]; then
+            # Linux GCC/Clang
+            cmake -B "${{ steps.strings.outputs.WORKSPACE_DIR }}/build-release" \
+            -G "${{ matrix.generator }}" \
+            -S "${{ steps.strings.outputs.WORKSPACE_DIR }}/eigen" \
+            -DCMAKE_INSTALL_PREFIX="${{ steps.strings.outputs.RELEASE_DIR_NAME }}" \
+            -DCMAKE_CXX_COMPILER=${{ matrix.cpp_compiler }} \
+            -DCMAKE_C_COMPILER=${{ matrix.c_compiler }} \
+            -DCMAKE_C_STANDARD=17 -DCMAKE_CXX_STANDARD=17 \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DCMAKE_BUILD_TYPE=Release
+
+            cmake -B "${{ steps.strings.outputs.WORKSPACE_DIR }}/build-debug" \
+            -G "${{ matrix.generator }}" \
+            -S "${{ steps.strings.outputs.WORKSPACE_DIR }}/eigen" \
+            -DCMAKE_INSTALL_PREFIX="${{ steps.strings.outputs.RELEASE_DIR_NAME }}" \
+            -DCMAKE_CXX_COMPILER=${{ matrix.cpp_compiler }} \
+            -DCMAKE_C_COMPILER=${{ matrix.c_compiler }} \
+            -DCMAKE_C_STANDARD=17 -DCMAKE_CXX_STANDARD=17 \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DCMAKE_BUILD_TYPE=Debug
+          
+          elif [[ "${{ matrix.c_compiler }}" == "cl" ]]; then
+            # Windows MSVC (对于 Visual Studio 额外指定架构，且不在生成阶段指定 -DCMAKE_BUILD_TYPE ，而是在 Build 阶段指定 --config 参数)
+            cmake -B "${{ steps.strings.outputs.WORKSPACE_DIR }}/build" \
+            -G "${{ matrix.generator }}" \
+            -S "${{ steps.strings.outputs.WORKSPACE_DIR }}/eigen" \
+            -DCMAKE_INSTALL_PREFIX="${{ steps.strings.outputs.RELEASE_DIR_NAME }}" \
+            -DCMAKE_CXX_COMPILER=${{ matrix.cpp_compiler }} \
+            -DCMAKE_C_COMPILER=${{ matrix.c_compiler }} \
+            -DCMAKE_C_STANDARD=17 -DCMAKE_CXX_STANDARD=17 \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DEIGEN_BUILD_BLAS=ON \
+            -DEIGEN_BUILD_LAPACK=ON \
+            -DEIGEN_BUILD_PKGCONFIG=ON \
+            -DEIGEN_BUILD_CMAKE_PACKAGE=ON \
+            -A ${{ matrix.arch }}
+          
+          else
+            # Windows MinGW
+            cmake -B "${{ steps.strings.outputs.WORKSPACE_DIR }}/build-release" \
+            -G "${{ matrix.generator }}" \
+            -S "${{ steps.strings.outputs.WORKSPACE_DIR }}/eigen" \
+            -DCMAKE_INSTALL_PREFIX="${{ steps.strings.outputs.RELEASE_DIR_NAME }}" \
+            -DCMAKE_CXX_COMPILER=${{ matrix.cpp_compiler }} \
+            -DCMAKE_C_COMPILER=${{ matrix.c_compiler }} \
+            -DCMAKE_C_STANDARD=17 -DCMAKE_CXX_STANDARD=17 \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DCMAKE_BUILD_TYPE=Release
+
+            cmake -B "${{ steps.strings.outputs.WORKSPACE_DIR }}/build-debug" \
+            -G "${{ matrix.generator }}" \
+            -S "${{ steps.strings.outputs.WORKSPACE_DIR }}/eigen" \
+            -DCMAKE_INSTALL_PREFIX="${{ steps.strings.outputs.RELEASE_DIR_NAME }}" \
+            -DCMAKE_CXX_COMPILER=${{ matrix.cpp_compiler }} \
+            -DCMAKE_C_COMPILER=${{ matrix.c_compiler }} \
+            -DCMAKE_C_STANDARD=17 -DCMAKE_CXX_STANDARD=17 \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_CXX_FLAGS="-Wa,-mbig-obj" -DCMAKE_C_FLAGS="-Wa,-mbig-obj"
+
+          fi
+
+      - name: Build And Install
+        shell: bash
+        run: |
+          if [[ "${{ matrix.c_compiler }}" == "cl" ]]; then
+            # Visual Studio: 分别构建 Debug 和 Release (VS 需要 --config 参数，MinGW 和 Unix Makefiles 不需要 --config)
+            cmake --build ${{ steps.strings.outputs.WORKSPACE_DIR }}/build --target install --config Release --parallel
+            cmake --build ${{ steps.strings.outputs.WORKSPACE_DIR }}/build --target install --config Debug --parallel
+          else
+            # 其他编译器: 分别构建 Release 和 Debug
+            cmake --build ${{ steps.strings.outputs.WORKSPACE_DIR }}/build-release --target install --parallel 2 --verbose
+            cmake --build ${{ steps.strings.outputs.WORKSPACE_DIR }}/build-debug --target install --parallel 2 --verbose
+          fi
+
+      - name: Package
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" == "Windows" ]; then
+            7z a -r ${{ steps.strings.outputs.WORKSPACE_DIR }}/${{ steps.strings.outputs.RELEASE_DIR_NAME }}.7z ${{ steps.strings.outputs.RELEASE_DIR_NAME }}
+          else
+            tar -cJvf ${{ steps.strings.outputs.WORKSPACE_DIR }}/${{ steps.strings.outputs.RELEASE_DIR_NAME }}.tar.xz ${{ steps.strings.outputs.RELEASE_DIR_NAME }}
+          fi
+
+      # - name: Upload artifacts
+      #   uses: actions/upload-artifact@v4
+      #   with:
+      #     name: eigen-${{ matrix.os }}-${{ matrix.c_compiler }}
+      #     path: |
+      #       ${{ steps.strings.outputs.WORKSPACE_DIR }}/${{ steps.strings.outputs.RELEASE_DIR_NAME }}.tar.xz
+      #       ${{ steps.strings.outputs.WORKSPACE_DIR }}/${{ steps.strings.outputs.RELEASE_DIR_NAME }}.7z
+
+      - name: Upload to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: eigen
+          body: |
+            # Eigen Prebuilt Libraries
+            
+            ## Build Information
+            - **Version**: v5.0.0
+          files: |
+            ${{ steps.strings.outputs.WORKSPACE_DIR }}/${{ steps.strings.outputs.RELEASE_DIR_NAME }}.*
+          overwrite_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

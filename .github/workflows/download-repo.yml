@@ -1,0 +1,38 @@
+name: Package Repo and Upload Artifacts
+
+on:
+  workflow_dispatch:
+  # push:
+  #   branches: [ "main", "master" ]
+  # pull_request:
+  #   branches: [ "main", "master" ]
+
+jobs:
+  download-upload:
+    runs-on: ${{ matrix.os }} 
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest]
+        c_compiler: [gcc]
+        include:
+          # Windows + MinGW
+          - os: windows-latest
+            c_compiler: gcc
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4 # 使用actions/checkout动作检出代码库
+
+      - name: Pull gRPC repo And Package
+        shell: bash
+        run: |
+          git clone --recurse-submodules -b v1.75.1 --depth 1 --shallow-submodules https://github.com/grpc/grpc.git
+          7z a -r grpc-repo.7z grpc
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: grpc-src
+          path: |
+            grpc-repo.7z

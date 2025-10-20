@@ -1,0 +1,261 @@
+name: Qt Widget Static(x2)
+
+on:
+  workflow_dispatch:
+  # push:
+  #   branches: [ "main", "master" ]
+  # pull_request:
+  #   branches: [ "main", "master" ]
+
+jobs:
+  build-library:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Windows + MSVC
+          - os: windows-latest
+            c_compiler: cl
+            cpp_compiler: cl
+            generator: "Ninja"
+            toolchain: msvc
+            
+          # Windows + MinGW
+          - os: windows-latest
+            c_compiler: gcc
+            cpp_compiler: g++
+            generator: "Ninja"
+            toolchain: mingw
+            
+          # Linux + GCC
+          - os: ubuntu-latest
+            c_compiler: gcc
+            cpp_compiler: g++
+            generator: "Ninja"
+            toolchain: gcc
+            
+          # Linux + Clang
+          - os: ubuntu-latest
+            c_compiler: clang
+            cpp_compiler: clang++
+            generator: "Ninja"
+            toolchain: clang
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set reusable strings
+        id: strings
+        shell: bash
+        run: |
+            workspace_dir="${{ github.workspace }}"
+            workspace_dir="${workspace_dir//\\//}"
+            workspace_dir="${workspace_dir%/}"
+
+            full_version="v0.8.0-$(date +'%Y%m%d')"
+            platform=$(echo $RUNNER_OS | tr '[:upper:]' '[:lower:]')-$(uname -m)
+            release_dir_name="qt-widget-${full_version}-${platform}-${{ matrix.toolchain }}"
+
+            echo "WORKSPACE_DIR=$workspace_dir" >> "$GITHUB_OUTPUT"
+            echo "RELEASE_DIR_NAME=$release_dir_name" >> "$GITHUB_OUTPUT"
+
+      - name: Download Qt Sources
+        shell: bash
+        run: |
+          curl -k -L --retry 3 --connect-timeout 30 -O https://download.qt.io/official_releases/qt/6.10/6.10.0/single/qt-everywhere-src-6.10.0.tar.xz
+          tar -xvf qt-everywhere-src-6.10.0.tar.xz
+          rm qt-everywhere-src-6.10.0.tar.xz
+          mv qt-everywhere-src-6.10.0 qt-src
+
+      - name: Install dependencies (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            ninja-build \
+            libgl1-mesa-dev \
+            libfontconfig1-dev \
+            libfreetype6-dev \
+            libx11-dev \
+            libx11-xcb-dev \
+            libxext-dev \
+            libxfixes-dev \
+            libxi-dev \
+            libxrender-dev \
+            libxcb1-dev \
+            libxcb-glx0-dev \
+            libxcb-keysyms1-dev \
+            libxcb-image0-dev \
+            libxcb-shm0-dev \
+            libxcb-icccm4-dev \
+            libxcb-sync-dev \
+            libxcb-xfixes0-dev \
+            libxcb-shape0-dev \
+            libxcb-randr0-dev \
+            libxcb-render-util0-dev \
+            libxcb-util-dev \
+            libxcb-xinerama0-dev \
+            libxcb-xkb-dev \
+            libxkbcommon-dev \
+            libxkbcommon-x11-dev \
+            libssl-dev \
+            libdbus-1-dev
+
+      - name: Install dependencies (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: bash
+        run: |
+          echo skipping windows dependencies installation
+
+      - name: Configure Qt Build
+        shell: bash
+        run: |
+          build_dir="build-release"
+          mkdir -p $build_dir
+          cd $build_dir
+          
+          # 基础配置选项
+          config_options=(
+            "-DBUILD_SHARED_LIBS=OFF"
+            "-DCMAKE_BUILD_TYPE=Release"
+            "-DCMAKE_INSTALL_PREFIX=../${{ steps.strings.outputs.RELEASE_DIR_NAME }}"
+            "-DQT_FEATURE_static_runtime=ON"
+            "-DQT_NO_SBOM=ON"  # 禁用 SBOM 生成
+          )
+          
+          # 排除 Qt Quick 相关模块
+          quick_modules=(
+            "qtquick3d" "qtquickeffectmaker" "qtquicktimeline" "qtquick3dphysics" 
+            "qtquick3dhelpers" "qtquick3dassetimports" "qtquick3dparticleeffects"
+            "qtquick3dparticles" "qtquick3dphysics" "qtquick3druntimerender"
+            "qtquickdesignercomponents" "qtquicktemplates2" "qtquickcontrols2"
+            "qtquick3d" "qtquick" "qtlabsplatform" "qtqml" "qtqmlcore" "qtqmlmodels"
+            "qtqmlworkerscript" "qtqmlcompiler" "qtqmlxmllistmodel" "qtqmllocalstorage"
+            "qtdeclarative"  # 添加 qtdeclarative 模块
+          )
+          
+          for module in "${quick_modules[@]}"; do
+            config_options+=("-DQT_BUILD_${module^^}=OFF")
+          done
+          
+          # 禁用不需要的复杂模块（避免构建错误）
+          disable_modules=(
+            "qtwebengine"    # 基于 Chromium，构建复杂且容易出错
+            "qtwebview"      # 依赖 WebEngine
+            "qtwebchannel"   # 依赖 WebEngine
+            "qtwebsockets"   # 可选，如果不需要可以禁用
+            "qthttpserver"   # 可选
+            "qtgrpc"         # 可选
+            "qtmqtt"         # 可选
+            "qtopcua"        # 可选
+            "qtspeech"       # 可选
+            "qtvirtualkeyboard" # 可选
+            "qtwayland"      # Wayland 支持（Windows 上不需要）
+            "qtdoc"          # 文档工具
+            "qttools"        # 包含 designer.exe 等工具
+            "qttranslations" # 翻译文件（可选）
+          )
+          
+          for module in "${disable_modules[@]}"; do
+            config_options+=("-DQT_BUILD_${module^^}=OFF")
+          done
+          
+          # 启用 Widgets 和其他需要的模块
+          config_options+=(
+            "-DQT_BUILD_WIDGETS=ON"
+            "-DQT_BUILD_SERIALPORT=ON"
+            "-DQT_BUILD_NETWORK=ON"
+            "-DQT_BUILD_SQL=ON"
+            "-DQT_BUILD_XML=ON"
+            "-DQT_BUILD_CONCURRENT=ON"
+            "-DQT_BUILD_CORE=ON"
+            "-DQT_BUILD_GUI=ON"
+            "-DFEATURE_opengl=ON"
+          )
+          
+          # 平台特定配置
+          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
+            # Windows 配置 - 不使用系统库
+            config_options+=(
+              "-DFEATURE_opengl_dynamic=ON"
+              "-DFEATURE_fontconfig=OFF"           # Windows 不需要 fontconfig
+              "-DFEATURE_system_freetype=OFF"     # 使用 Qt 自带的 freetype
+              "-DFEATURE_system_harfbuzz=OFF"     # 使用 Qt 自带的 harfbuzz
+              "-DFEATURE_system_jpeg=OFF"         # 使用 Qt 自带的 jpeg
+              "-DFEATURE_system_png=OFF"          # 使用 Qt 自带的 png
+              "-DFEATURE_system_zlib=OFF"         # 使用 Qt 自带的 zlib
+            )
+          else
+            # Linux 配置 - 可以使用系统库
+            config_options+=(
+              "-DFEATURE_fontconfig=ON"
+              "-DFEATURE_system_freetype=ON"
+              "-DFEATURE_system_harfbuzz=ON"
+              "-DFEATURE_system_jpeg=ON"
+              "-DFEATURE_system_png=ON"
+              "-DFEATURE_system_zlib=ON"
+            )
+          fi
+          
+          # 编译器配置
+          if [[ "${{ matrix.c_compiler }}" == "cl" ]]; then
+            # MSVC 配置
+            cmake ../qt-src -G "${{ matrix.generator }}" "${config_options[@]}"
+          else
+            # MinGW/GCC/Clang 配置
+            cmake ../qt-src -G "${{ matrix.generator }}" \
+              -DCMAKE_C_COMPILER=${{ matrix.c_compiler }} \
+              -DCMAKE_CXX_COMPILER=${{ matrix.cpp_compiler }} \
+              "${config_options[@]}"
+          fi
+
+      - name: Build and Install
+        shell: bash
+        run: |
+          cd build-release
+          cmake --build . --parallel --target install
+
+      - name: Package Release
+        shell: bash
+        run: |
+          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
+            7z a -r ${{ steps.strings.outputs.RELEASE_DIR_NAME }}.7z ${{ steps.strings.outputs.RELEASE_DIR_NAME }}
+          else
+            tar -cJvf ${{ steps.strings.outputs.RELEASE_DIR_NAME }}.tar.xz ${{ steps.strings.outputs.RELEASE_DIR_NAME }}
+          fi
+
+      # - name: Upload artifacts
+      #   uses: actions/upload-artifact@v4
+      #   with:
+      #     name: qt-widget-${{ matrix.os }}-${{ matrix.toolchain }}
+      #     path: |
+      #       ${{ steps.strings.outputs.WORKSPACE_DIR }}/${{ steps.strings.outputs.RELEASE_DIR_NAME }}.*
+
+
+      - name: Upload to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: qt
+          body: |
+            # Qt Prebuilt Libraries
+            
+            ## Build Information
+            - **Version**: v6.10.0
+
+            ## Supported Modules
+            - **QtCore**
+            - **QtGui**
+            - **QtWidgets**
+            - **QtNetwork**
+            - **QtSql**
+            - **QtXml**
+            - **QtConcurrent**
+            - ......
+          files: |
+            ${{ steps.strings.outputs.WORKSPACE_DIR }}/${{ steps.strings.outputs.RELEASE_DIR_NAME }}.*
+          overwrite_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

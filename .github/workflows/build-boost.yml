@@ -1,0 +1,253 @@
+name: Boost
+
+on:
+  workflow_dispatch:
+  # push:
+  #   branches: [ "main", "master" ]
+  # pull_request:
+  #   branches: [ "main", "master" ]
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      # Set fail-fast to false to ensure that feedback is delivered for all matrix combinations. Consider changing this to true when your workflow is stable.
+      fail-fast: false
+
+      # Set up a matrix to run the following 3 configurations:
+      # 1. <Windows, Release, latest MSVC compiler toolchain on the default runner image, default generator>
+      # 2. <Linux, Release, latest GCC compiler toolchain on the default runner image, default generator>
+      # 3. <Linux, Release, latest Clang compiler toolchain on the default runner image, default generator>
+      #
+      # To add more build types (Release, Debug, RelWithDebInfo, etc.) customize the build_type list.
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        build_type: [Release]
+        c_compiler: [gcc, clang, cl]
+        include:
+          # Windows + MSVC
+          - os: windows-latest
+            c_compiler: cl
+            cpp_compiler: cl
+            generator: "Visual Studio 17 2022"
+            arch: "x64"
+          # Windows + MinGW
+          - os: windows-latest
+            c_compiler: gcc
+            cpp_compiler: g++
+            generator: "MinGW Makefiles"
+          # Linux + GCC
+          - os: ubuntu-latest
+            c_compiler: gcc
+            cpp_compiler: g++
+            generator: "Unix Makefiles"
+          # Linux + Clang
+          - os: ubuntu-latest
+            c_compiler: clang
+            cpp_compiler: clang++
+            generator: "Unix Makefiles"
+        exclude:
+          - os: windows-latest
+            c_compiler: clang
+          - os: ubuntu-latest
+            c_compiler: cl
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set reusable strings
+      # Turn repeated input strings (such as the build output directory) into step outputs. These step outputs can be used throughout the workflow file.
+      id: strings
+      shell: bash
+      run: |
+          # library sources
+          library_name="boost"
+          library_version="1.89.0"
+          src_pkg_name="boost-${library_version}-cmake.tar.gz"
+          download_url="https://github.com/boostorg/boost/releases/download/boost-${library_version}/${src_pkg_name}"
+
+          # github repo path
+          workspace_dir="${{ github.workspace }}"       # 从GitHub上下文获取路径并标准化
+          workspace_dir="${workspace_dir//\\//}"             # 替换所有反斜杠为正斜杠
+          workspace_dir="${workspace_dir%/}"                 # 移除路径末尾的斜杠（若有）
+
+          # release output path
+          full_version="v${library_version:-3.x.x}-$(date +'%Y%m%d')" # 使用语义化版本+日期
+          platform=$(echo $RUNNER_OS | tr '[:upper:]' '[:lower:]')-$(uname -m) # short_os-arch
+          if [ "$RUNNER_OS" == "Linux" ]; then
+            toolchain="${{ matrix.c_compiler }}"
+          elif [ "$RUNNER_OS" == "Windows" ]; then
+            if [ "${{ matrix.c_compiler }}" == "cl" ]; then
+              toolchain="msvc"
+            else
+              toolchain="msys2"
+            fi
+          fi
+          release_dir_name="${library_name}-${full_version}-${platform}-${toolchain}"
+
+          # github actions env
+          echo "LIB_NAME=$library_name" >> "$GITHUB_OUTPUT"
+          echo "LIB_VERSION=$library_version" >> "$GITHUB_OUTPUT"
+          echo "SRC_PKG_NAME=$src_pkg_name" >> "$GITHUB_OUTPUT"
+          echo "DOWNLOAD_URL=$download_url" >> "$GITHUB_OUTPUT"
+          echo "WORKSPACE_DIR=$workspace_dir" >> "$GITHUB_OUTPUT"
+          echo "RELEASE_DIR_NAME=$release_dir_name" >> "$GITHUB_OUTPUT"
+
+          # debug output
+          echo "=== GITHUB_OUTPUT ==="
+          cat "$GITHUB_OUTPUT"
+
+    - name: Download sources
+      shell: bash
+      run: |
+        curl -k -L --retry 3 --connect-timeout 30 -O ${{ steps.strings.outputs.DOWNLOAD_URL }}
+        tar -xvf ${{ steps.strings.outputs.SRC_PKG_NAME }}
+        mv boost-1.89.0 boost-src
+
+    - name: Build (Windows MSVC)
+      if: matrix.os == 'windows-latest' && matrix.c_compiler == 'cl'
+      shell: pwsh
+      run: |
+        # 使用 Developer PowerShell for VS 2022
+        $vsInstallPath = "C:\Program Files\Microsoft Visual Studio\2022\Enterprise"
+        $devShellPath = "$vsInstallPath\Common7\Tools\Launch-VsDevShell.ps1"
+        
+        if (-not (Test-Path $devShellPath)) {
+            $vsInstallPath = "C:\Program Files\Microsoft Visual Studio\2022\Professional"
+            $devShellPath = "$vsInstallPath\Common7\Tools\Launch-VsDevShell.ps1"
+        }
+        
+        if (-not (Test-Path $devShellPath)) {
+            $vsInstallPath = "C:\Program Files\Microsoft Visual Studio\2022\Community" 
+            $devShellPath = "$vsInstallPath\Common7\Tools\Launch-VsDevShell.ps1"
+        }
+        
+        if (Test-Path $devShellPath) {
+            Write-Host "Launching Developer PowerShell for Visual Studio..."
+            & $devShellPath -Arch amd64
+        } else {
+            Write-Error "Developer PowerShell for Visual Studio not found"
+            exit 1
+        }
+        
+        # 现在在 Developer PowerShell 环境中构建
+        Write-Host "Building Boost with MSVC..."
+        
+        # 创建输出目录
+        New-Item -ItemType Directory -Force -Path "${{ steps.strings.outputs.RELEASE_DIR_NAME }}"
+        
+        # 进入构建目录构建
+        Set-Location "boost-src"
+        .\bootstrap.bat
+        .\b2 toolset=msvc address-model=64 variant=release,debug threading=multi link=static,shared runtime-link=shared --prefix=${{ steps.strings.outputs.WORKSPACE_DIR }}/${{ steps.strings.outputs.RELEASE_DIR_NAME }} install
+
+    - name: Build (Windows MSYS2 MinGW)
+      if: matrix.os == 'windows-latest' && matrix.c_compiler == 'gcc'
+      shell: bash
+      run: |
+        # 更新系统并安装依赖（带重试机制）
+        function install_with_retry {
+          local max_retries=3
+          local retry_delay=10
+          local attempt=1
+          
+          while [ $attempt -le $max_retries ]; do
+            echo "Attempt $attempt: $1"
+            C:/msys64/usr/bin/bash -lc "$1" && return 0
+            sleep $retry_delay
+            ((attempt++))
+          done
+          return 1
+        }
+
+        # 更新系统
+        install_with_retry "pacman --noconfirm -Sy"
+        install_with_retry "pacman --noconfirm -S msys2-keyring"
+        install_with_retry "pacman --noconfirm -Syu"
+
+        # 安装必要包 - 使用 msys/perl 而不是 mingw-w64-x86_64-perl
+        install_with_retry "pacman --noconfirm -S \
+          base-devel \
+          mingw-w64-x86_64-toolchain \
+          mingw-w64-x86_64-zlib \
+          mingw-w64-x86_64-bzip2 \
+          mingw-w64-x86_64-python \
+          mingw-w64-x86_64-icu \
+          mingw-w64-x86_64-graphviz \
+          msys/perl \
+          make \
+          nasm \
+          git"
+
+        # 在MSYS2环境中执行后续操作
+        C:/msys64/usr/bin/bash -lc "
+          # 设置正确的环境
+          export MSYSTEM=MINGW64
+          export CHERE_INVOKING=1
+          export MSYS2_PATH_TYPE=inherit
+          
+          # 重新加载profile以设置正确环境
+          source /etc/profile
+
+          # 创建安装目录和进入源码目录
+          cd ${{ steps.strings.outputs.WORKSPACE_DIR }}
+          mkdir -p ./${{ steps.strings.outputs.RELEASE_DIR_NAME }}
+          cd boost-src
+          pwd
+          ls -la
+
+          # 构建
+          ./bootstrap.sh --prefix=${{ steps.strings.outputs.WORKSPACE_DIR }}/${{ steps.strings.outputs.RELEASE_DIR_NAME }}
+          ./b2 --without-python --without-stacktrace toolset=${{ matrix.c_compiler }} address-model=64 variant=release,debug threading=multi link=static,shared runtime-link=shared -j$(nproc) install
+        "
+
+    # - name: Build (Windows MSYS2 MinGW)
+    #   if: matrix.os == 'windows-latest' && matrix.c_compiler == 'gcc'
+    #   shell: bash
+    #   run: |
+    #     mkdir -p ./${{ steps.strings.outputs.RELEASE_DIR_NAME }}
+    #     cd ./boost-src
+    #     ./bootstrap.sh --prefix=${{ steps.strings.outputs.WORKSPACE_DIR }}/${{ steps.strings.outputs.RELEASE_DIR_NAME }}
+    #     ./b2 toolset=${{ matrix.c_compiler }} variant=release,debug threading=multi link=static,shared runtime-link=shared install
+
+    - name: Build (Linux GCC/CLang)
+      if: matrix.os != 'windows-latest'
+      shell: bash
+      run: |
+        mkdir -p ./${{ steps.strings.outputs.RELEASE_DIR_NAME }}
+        cd ./boost-src
+        ./bootstrap.sh --prefix=${{ steps.strings.outputs.WORKSPACE_DIR }}/${{ steps.strings.outputs.RELEASE_DIR_NAME }}
+        ./b2 toolset=${{ matrix.c_compiler }} variant=release,debug threading=multi link=static,shared install
+
+    - name: Package
+      shell: bash
+      run: |
+        if [ "$RUNNER_OS" == "Windows" ]; then
+          7z a -r ${{ steps.strings.outputs.WORKSPACE_DIR }}/${{ steps.strings.outputs.RELEASE_DIR_NAME }}.7z ${{ steps.strings.outputs.RELEASE_DIR_NAME }}
+        else
+          tar -cJvf ${{ steps.strings.outputs.WORKSPACE_DIR }}/${{ steps.strings.outputs.RELEASE_DIR_NAME }}.tar.xz ${{ steps.strings.outputs.RELEASE_DIR_NAME }}
+        fi
+
+    # - name: Upload artifacts
+    #   uses: actions/upload-artifact@v4
+    #   with:
+    #     name: boost-${{ matrix.os }}-${{ matrix.c_compiler }}
+    #     path: |
+    #       ${{ steps.strings.outputs.WORKSPACE_DIR }}/${{ steps.strings.outputs.RELEASE_DIR_NAME }}.tar.xz
+    #       ${{ steps.strings.outputs.WORKSPACE_DIR }}/${{ steps.strings.outputs.RELEASE_DIR_NAME }}.7z
+
+    - name: Upload to Release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: boost
+        body: |
+          # Boost Prebuilt Libraries
+          
+          ## Build Information
+          - **Version**: v1.89.0
+        files: |
+          ${{ steps.strings.outputs.WORKSPACE_DIR }}/${{ steps.strings.outputs.RELEASE_DIR_NAME }}.*
+        overwrite_files: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
