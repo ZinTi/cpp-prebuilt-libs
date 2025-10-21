@@ -60,7 +60,7 @@ jobs:
             workspace_dir="${workspace_dir%/}"            # 移除路径末尾的斜杠（若有）
 
             # release output path
-            full_version="v1.75.1-$(date +'%Y%m%d')" # 使用语义化版本+日期
+            full_version="v1.76.0-$(date +'%Y%m%d')" # 使用语义化版本+日期
             platform=$(echo $RUNNER_OS | tr '[:upper:]' '[:lower:]')-$(uname -m) # short_os-arch
             if [ "$RUNNER_OS" == "Linux" ]; then
               toolchain="${{ matrix.c_compiler }}"
@@ -84,7 +84,7 @@ jobs:
       - name: Pull gRPC repo
         shell: bash
         run: |
-          git clone --recurse-submodules -b v1.75.1 --depth 1 --shallow-submodules https://github.com/grpc/grpc.git
+          git clone --recurse-submodules -b v1.76.0 --depth 1 --shallow-submodules https://github.com/grpc/grpc.git
           mkdir -p ${{ steps.strings.outputs.RELEASE_DIR_NAME }}
           cd grpc
           ls -alh
@@ -96,7 +96,8 @@ jobs:
           sed -i '1i #include <cstdint>' ${{ steps.strings.outputs.WORKSPACE_DIR }}/grpc/third_party/re2/util/pcre.h
           echo "Applied re2 header fix"
 
-      - name: Configure CMake project
+      - name: Configure CMake project(exclude MinGW)
+        if: ${{ matrix.generator != 'MinGW Makefiles' }}
         shell: bash
         run: |
           # -B <build-dir> -G <generator-name> -S <source-dir> -DCMAKE_INSTALL_PREFIX=<install-dir> -DCMAKE_BUILD_TYPE=<type> -A <arch for vs>
@@ -163,49 +164,52 @@ jobs:
             -A ${{ matrix.arch }}
 
           else
-            cmake -B "${{ steps.strings.outputs.WORKSPACE_DIR }}/build-release" \
-            -G "${{ matrix.generator }}" \
-            -S "${{ steps.strings.outputs.WORKSPACE_DIR }}/grpc" \
-            -DCMAKE_INSTALL_PREFIX="${{ steps.strings.outputs.RELEASE_DIR_NAME }}" \
-            -DCMAKE_CXX_COMPILER=${{ matrix.cpp_compiler }} \
-            -DCMAKE_C_COMPILER=${{ matrix.c_compiler }} \
-            -DCMAKE_C_STANDARD=17 -DCMAKE_CXX_STANDARD=17 \
-            -DOPENSSL_NO_ASM=ON -DOPENSSL_NO_ADX=ON \
-            -DgRPC_BUILD_TESTS=OFF \
-            -DBUILD_SHARED_LIBS=OFF \
-            -DgRPC_INSTALL=ON \
-            -DgRPC_ABSL_PROVIDER=module \
-            -DgRPC_CARES_PROVIDER=module \
-            -DgRPC_PROTOBUF_PROVIDER=module \
-            -DgRPC_RE2_PROVIDER=module \
-            -DgRPC_SSL_PROVIDER=module \
-            -DgRPC_ZLIB_PROVIDER=module \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_CXX_FLAGS="-Wa,-mbig-obj" -DCMAKE_C_FLAGS="-Wa,-mbig-obj"
-
-            cmake -B "${{ steps.strings.outputs.WORKSPACE_DIR }}/build-debug" \
-            -G "${{ matrix.generator }}" \
-            -S "${{ steps.strings.outputs.WORKSPACE_DIR }}/grpc" \
-            -DCMAKE_INSTALL_PREFIX="${{ steps.strings.outputs.RELEASE_DIR_NAME }}" \
-            -DCMAKE_CXX_COMPILER=${{ matrix.cpp_compiler }} \
-            -DCMAKE_C_COMPILER=${{ matrix.c_compiler }} \
-            -DCMAKE_C_STANDARD=17 -DCMAKE_CXX_STANDARD=17 \
-            -DOPENSSL_NO_ASM=ON -DOPENSSL_NO_ADX=ON \
-            -DgRPC_BUILD_TESTS=OFF \
-            -DBUILD_SHARED_LIBS=OFF \
-            -DgRPC_INSTALL=ON \
-            -DgRPC_ABSL_PROVIDER=module \
-            -DgRPC_CARES_PROVIDER=module \
-            -DgRPC_PROTOBUF_PROVIDER=module \
-            -DgRPC_RE2_PROVIDER=module \
-            -DgRPC_SSL_PROVIDER=module \
-            -DgRPC_ZLIB_PROVIDER=module \
-            -DCMAKE_BUILD_TYPE=Debug \
-            -DCMAKE_CXX_FLAGS="-Wa,-mbig-obj" -DCMAKE_C_FLAGS="-Wa,-mbig-obj"
-
+            echo "Unsupported configuration for this step."
           fi
 
-      - name: Build And Install
+      # 用 git bash 编译 gRPC MinGW 版本时，在链接阶段会出现找不到dll依赖的问题，故而改用 powershell 执行相关命令
+      - name: Configure CMake project(only MinGW)
+        if: ${{ matrix.generator == 'MinGW Makefiles' }}
+        shell: pwsh
+        run: |
+          cmake -B "${{ steps.strings.outputs.WORKSPACE_DIR }}/build-release" `
+          -G "${{ matrix.generator }}" `
+          -S "${{ steps.strings.outputs.WORKSPACE_DIR }}/grpc" `
+          -DCMAKE_INSTALL_PREFIX="${{ steps.strings.outputs.RELEASE_DIR_NAME }}" `
+          -DCMAKE_C_STANDARD=17 -DCMAKE_CXX_STANDARD=17 `
+          -DOPENSSL_NO_ASM=ON -DOPENSSL_NO_ADX=ON `
+          -DgRPC_BUILD_TESTS=OFF `
+          -DBUILD_SHARED_LIBS=OFF `
+          -DgRPC_INSTALL=ON `
+          -DgRPC_ABSL_PROVIDER=module `
+          -DgRPC_CARES_PROVIDER=module `
+          -DgRPC_PROTOBUF_PROVIDER=module `
+          -DgRPC_RE2_PROVIDER=module `
+          -DgRPC_SSL_PROVIDER=module `
+          -DgRPC_ZLIB_PROVIDER=module `
+          -DCMAKE_BUILD_TYPE=Release `
+          -DCMAKE_CXX_FLAGS="-Wa,-mbig-obj" -DCMAKE_C_FLAGS="-Wa,-mbig-obj"
+
+          cmake -B "${{ steps.strings.outputs.WORKSPACE_DIR }}/build-debug" `
+          -G "${{ matrix.generator }}" `
+          -S "${{ steps.strings.outputs.WORKSPACE_DIR }}/grpc" `
+          -DCMAKE_INSTALL_PREFIX="${{ steps.strings.outputs.RELEASE_DIR_NAME }}" `
+          -DCMAKE_C_STANDARD=17 -DCMAKE_CXX_STANDARD=17 `
+          -DOPENSSL_NO_ASM=ON -DOPENSSL_NO_ADX=ON `
+          -DgRPC_BUILD_TESTS=OFF `
+          -DBUILD_SHARED_LIBS=OFF `
+          -DgRPC_INSTALL=ON `
+          -DgRPC_ABSL_PROVIDER=module `
+          -DgRPC_CARES_PROVIDER=module `
+          -DgRPC_PROTOBUF_PROVIDER=module `
+          -DgRPC_RE2_PROVIDER=module `
+          -DgRPC_SSL_PROVIDER=module `
+          -DgRPC_ZLIB_PROVIDER=module `
+          -DCMAKE_BUILD_TYPE=Debug `
+          -DCMAKE_CXX_FLAGS="-Wa,-mbig-obj" -DCMAKE_C_FLAGS="-Wa,-mbig-obj"
+
+      - name: Build And Install(exclude MinGW)
+        if: ${{ matrix.generator != 'MinGW Makefiles' }}
         shell: bash
         run: |
           if [[ "${{ matrix.os }}" == "ubuntu-latest" ]]; then
@@ -236,12 +240,12 @@ jobs:
           
           fi
 
-      - name: Build And Install (pwsh)
-        if: ${{ matrix.os}} == 'windows-latest' && ${{ matrix.c_compiler }} == 'gcc'
+      - name: Build And Install(only MinGW)
+        if: ${{ matrix.generator == 'MinGW Makefiles' }}
         shell: pwsh
         run: |
-          # cmake --build ${{ steps.strings.outputs.WORKSPACE_DIR }}/build-release --target install --parallel 2 --verbose > $null
-          # cmake --build ${{ steps.strings.outputs.WORKSPACE_DIR }}/build-debug --target install --parallel 2 --verbose > $null
+          cmake --build ${{ steps.strings.outputs.WORKSPACE_DIR }}/build-release --target install --parallel 2 --verbose
+          cmake --build ${{ steps.strings.outputs.WORKSPACE_DIR }}/build-debug --target install --parallel 2 --verbose
 
       - name: Package
         shell: bash
@@ -268,7 +272,7 @@ jobs:
             # gRPC Prebuilt Libraries
             
             ## Build Information
-            - **Version**: v1.75.1
+            - **Version**: v1.76.0
           files: |
             ${{ steps.strings.outputs.WORKSPACE_DIR }}/${{ steps.strings.outputs.RELEASE_DIR_NAME }}.*
           overwrite_files: true
