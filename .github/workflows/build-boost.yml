@@ -63,7 +63,7 @@ jobs:
       run: |
           # library sources
           library_name="boost"
-          library_version="1.89.0"
+          library_version="1.90.0"
           src_pkg_name="boost-${library_version}-cmake.tar.gz"
           download_url="https://github.com/boostorg/boost/releases/download/boost-${library_version}/${src_pkg_name}"
 
@@ -103,7 +103,7 @@ jobs:
       run: |
         curl -k -L --retry 3 --connect-timeout 30 -O ${{ steps.strings.outputs.DOWNLOAD_URL }}
         tar -xvf ${{ steps.strings.outputs.SRC_PKG_NAME }}
-        mv boost-1.89.0 boost-src
+        mv boost-1.90.0 boost-src
 
     - name: Build (Windows MSVC)
       if: matrix.os == 'windows-latest' && matrix.c_compiler == 'cl'
@@ -245,7 +245,7 @@ jobs:
           # Boost Prebuilt Libraries
           
           ## Build Information
-          - **Version**: v1.89.0
+          - **Version**: v1.90.0
         files: |
           ${{ steps.strings.outputs.WORKSPACE_DIR }}/${{ steps.strings.outputs.RELEASE_DIR_NAME }}.*
         overwrite_files: true

@@ -60,7 +60,7 @@ jobs:
             workspace_dir="${workspace_dir%/}"            # 移除路径末尾的斜杠（若有）
 
             # release output path
-            full_version="v0.8.0-$(date +'%Y%m%d')" # 使用语义化版本+日期
+            full_version="v0.9.0-$(date +'%Y%m%d')" # 使用语义化版本+日期
             platform=$(echo $RUNNER_OS | tr '[:upper:]' '[:lower:]')-$(uname -m) # short_os-arch
             if [ "$RUNNER_OS" == "Linux" ]; then
               toolchain="${{ matrix.c_compiler }}"
@@ -84,8 +84,8 @@ jobs:
       - name: Pull yaml-cpp repo
         shell: bash
         run: |
-          # yaml-cpp 项目的标签名是 0.8.0（不带 "v"）
-          git clone --recurse-submodules -b 0.8.0 --depth 1 --shallow-submodules https://github.com/jbeder/yaml-cpp.git
+          # yaml-cpp 项目的每个版本的标签名都不是很规范
+          git clone --recurse-submodules -b yaml-cpp-0.9.0 --depth 1 --shallow-submodules https://github.com/jbeder/yaml-cpp.git
           mkdir -p ${{ steps.strings.outputs.RELEASE_DIR_NAME }}
           cd yaml-cpp
           ls -alh
@@ -175,7 +175,7 @@ jobs:
             # yaml-cpp Prebuilt Libraries
             
             ## Build Information
-            - **Version**: v0.8.0
+            - **Version**: v0.9.0
           files: |
             ${{ steps.strings.outputs.WORKSPACE_DIR }}/${{ steps.strings.outputs.RELEASE_DIR_NAME }}.*
           overwrite_files: true
