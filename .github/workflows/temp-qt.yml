@@ -21,19 +21,29 @@ jobs:
         shell: bash
         run: |
 
-          curl -L --retry 3 -O https://github.com/ZinTi/cpp-prebuilt-libs/releases/download/qt/qt-release-6.10.0-20251030-windows-x86_64-msvc.7z
-          # 打包 qt 时压缩包中没有包含根目录，故解压缩后重新压缩一次以包含根目录（并修改日期）
-          7z x qt-release-6.10.0-20251030-windows-x86_64-msvc.7z -o"./qt-release-6.10.0-20260217-windows-x86_64-msvc/"
-          rm qt-release-6.10.0-20251030-windows-x86_64-msvc.7z
-          7z a -r qt-release-6.10.0-20260217-windows-x86_64-msvc.7z ./qt-release-6.10.0-20260217-windows-x86_64-msvc/
-          ls -lh ./qt-release-6.10.0-20260217-windows-x86_64-msvc
+          curl -L -k --retry 3 -O https://github.com/ZinTi/cpp-prebuilt-libs/releases/download/qt/qt-release-6.10.0-20251024-linux-x86_64-gcc.tar.xz
+          tar -xvf qt-release-6.10.0-20251024-linux-x86_64-gcc.tar.xz
+          ls -lh ./qt-release-6.10.0-20251024-linux-x86_64-gcc/
+          rm qt-release-6.10.0-20251024-linux-x86_64-gcc.tar.xz
+          
+          curl -L -k --retry 3 -O https://github.com/ZinTi/cpp-prebuilt-libs/releases/download/qt/qt-release-6.10.0-20251024-linux-x86_64-clang.tar.xz
+          tar -xvf qt-release-6.10.0-20251024-linux-x86_64-clang.tar.xz
+          ls -lh ./qt-release-6.10.0-20251024-linux-x86_64-clang/
+          rm qt-release-6.10.0-20251024-linux-x86_64-clang.tar.xz
 
-          curl -L --retry 3 -O https://github.com/ZinTi/cpp-prebuilt-libs/releases/download/qt/qt-release-6.10.0-20251025-windows-x86_64-mingw.7z
-          # 打包 qt 时压缩包中没有包含根目录，故解压缩后重新压缩一次以包含根目录（并修改日期）
-          7z x qt-release-6.10.0-20251025-windows-x86_64-mingw.7z -o"./qt-release-6.10.0-20260217-windows-x86_64-mingw/"
-          rm qt-release-6.10.0-20251025-windows-x86_64-mingw.7z
-          7z a -r qt-release-6.10.0-20260217-windows-x86_64-mingw.7z ./qt-release-6.10.0-20260217-windows-x86_64-mingw/
-          ls -lh ./qt-release-6.10.0-20260217-windows-x86_64-mingw
+          # curl -L --retry 3 -O https://github.com/ZinTi/cpp-prebuilt-libs/releases/download/qt/qt-release-6.10.0-20251030-windows-x86_64-msvc.7z
+          # # 打包 qt 时压缩包中没有包含根目录，故解压缩后重新压缩一次以包含根目录（并修改日期）
+          # 7z x qt-release-6.10.0-20251030-windows-x86_64-msvc.7z -o"./qt-release-6.10.0-20260217-windows-x86_64-msvc/"
+          # rm qt-release-6.10.0-20251030-windows-x86_64-msvc.7z
+          # 7z a -r qt-release-6.10.0-20260217-windows-x86_64-msvc.7z ./qt-release-6.10.0-20260217-windows-x86_64-msvc/
+          # ls -lh ./qt-release-6.10.0-20260217-windows-x86_64-msvc
+
+          # curl -L --retry 3 -O https://github.com/ZinTi/cpp-prebuilt-libs/releases/download/qt/qt-release-6.10.0-20251025-windows-x86_64-mingw.7z
+          # # 打包 qt 时压缩包中没有包含根目录，故解压缩后重新压缩一次以包含根目录（并修改日期）
+          # 7z x qt-release-6.10.0-20251025-windows-x86_64-mingw.7z -o"./qt-release-6.10.0-20260217-windows-x86_64-mingw/"
+          # rm qt-release-6.10.0-20251025-windows-x86_64-mingw.7z
+          # 7z a -r qt-release-6.10.0-20260217-windows-x86_64-mingw.7z ./qt-release-6.10.0-20260217-windows-x86_64-mingw/
+          # ls -lh ./qt-release-6.10.0-20260217-windows-x86_64-mingw
           
 
       # - name: Upload artifacts
@@ -43,25 +53,25 @@ jobs:
       #     path: |
       #       ${{ steps.strings.outputs.WORKSPACE_DIR }}/${{ steps.strings.outputs.RELEASE_DIR_NAME }}.*
 
-      - name: Upload to Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: qt
-          body: |
-            # Qt Prebuilt Libraries
+      # - name: Upload to Release
+      #   uses: softprops/action-gh-release@v2
+      #   with:
+      #     tag_name: qt
+      #     body: |
+      #       # Qt Prebuilt Libraries
             
-            ## Build Information
-            - **Version**: v6.10.0
+      #       ## Build Information
+      #       - **Version**: v6.10.0
 
-            Qt Prebuilt Libraries
-            Static Release
-            - 1. Windows x64 MinGW
-            - 2. Windows x64 MSVC
-            - 3. GNU/Linux x64 GCC
-            - 4. GNU/Linux x64 Clang
-          files: |
-            qt-release-6.10.0-20260217-windows-x86_64-msvc.7z
-            qt-release-6.10.0-20260217-windows-x86_64-mingw.7z
-          overwrite_files: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      #       Qt Prebuilt Libraries
+      #       Static Release
+      #       - 1. Windows x64 MinGW
+      #       - 2. Windows x64 MSVC
+      #       - 3. GNU/Linux x64 GCC
+      #       - 4. GNU/Linux x64 Clang
+      #     files: |
+      #       qt-release-6.10.0-20260217-windows-x86_64-msvc.7z
+      #       qt-release-6.10.0-20260217-windows-x86_64-mingw.7z
+      #     overwrite_files: true
+      #   env:
+      #     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
