@@ -5,7 +5,7 @@ set -e
 # Configuration
 QT_VERSION="6.10.2"
 BUILD_DIR="build-release"
-INSTALL_DIR="qt-release-${QT_VERSION}-20260218-linux-x86_64-gcc"
+INSTALL_DIR="qt-release-${QT_VERSION}-20260304-linux-x86_64-gcc"
 SOURCE_DIR="qt-everywhere-src-${QT_VERSION}"
 ARCHIVE_NAME="${INSTALL_DIR}.tar.xz"
 
@@ -32,12 +32,10 @@ cmake -G "Ninja" \
     -DQT_BUILD_EXAMPLES=OFF \
     -DQT_BUILD_TESTS=OFF \
     -DQT_BUILD_BENCHMARKS=OFF \
+    -DQT_FEATURE_xcb=ON  \
     -DCMAKE_INSTALL_PREFIX=../$INSTALL_DIR \
     ../$SOURCE_DIR \
-    -DQT_FEATURE_glib=OFF \
-    -DQT_BUILD_webengine=OFF \
-    -DQT_BUILD_grpc=OFF \
-    -DQT_BUILD_pdf=OFF
+    -DQT_BUILD_grpc=OFF
 
 
 # Build Qt
@@ -69,3 +67,4 @@ else
     echo "Error: Archive creation failed"
     exit 1
 fi
+
